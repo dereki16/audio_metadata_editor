@@ -1,0 +1,324 @@
+/* ============================================================
+   GLOBAL STYLES
+   ============================================================ */
+QWidget {
+    background-color: #1e1e1e;
+    color: #ddd;
+    font-size: 13px;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+/* ============================================================
+   LINE EDITS
+   ============================================================ */
+QLineEdit {
+    background-color: #2d2d2d;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px;
+    selection-background-color: #0078d4;
+}
+
+QLineEdit:focus {
+    border: 1px solid #0078d4;
+    background-color: #333;
+}
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+QPushButton {
+    background-color: #3a3a3a;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 5px;
+    padding: 4px;
+    font-weight: 500;
+}
+
+QPushButton:hover {
+    background-color: #4a4a4a;
+    border: 1px solid #666;
+}
+
+QPushButton:pressed {
+    background-color: #2a2a2a;
+}
+
+QPushButton:disabled {
+    background-color: #2a2a2a;
+    color: #666;
+}
+
+/* Special button styles */
+QPushButton#playButton {
+    background-color: #0078d4;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px;
+}
+
+QPushButton#playButton:hover {
+    background-color: #1088e4;
+}
+
+QPushButton#cleanupButton {
+    background-color: #2d5a2d;
+    font-weight: 600;
+}
+
+QPushButton#cleanupButton:hover {
+    background-color: #3a6a3a;
+}
+
+QPushButton#saveButton {
+    background-color: #1a4a7a;
+    font-weight: 600;
+    padding: 5px;
+}
+
+QPushButton#saveButton:hover {
+    background-color: #2a5a8a;
+}
+
+QPushButton#saveButton:disabled {
+    background-color: #2a2a2a;
+    color: #666;
+}
+
+QPushButton#cropButton {
+    background-color: #2d5a2d;
+    font-weight: 600;
+}
+
+QPushButton#cropButton:hover {
+    background-color: #3a6a3a;
+}
+
+/* ============================================================
+   LIST WIDGET
+   ============================================================ */
+QListWidget {
+    background-color: #252525;
+    alternate-background-color: #2a2a2a;
+    color: #ddd;
+    border: 1px solid #444;
+    border-radius: 5px;
+    padding: 0px;
+}
+
+QListWidget::item {
+    padding: 0px;
+    border-radius: 3px;
+}
+
+QListWidget::item:selected {
+    background-color: #0078d4;
+    color: white;
+}
+
+QListWidget::item:hover {
+    background-color: #333;
+}
+
+/* ============================================================
+   CHECKBOXES
+   ============================================================ */
+QCheckBox {
+    color: #ddd;
+    spacing: 8px;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #555;
+    border-radius: 3px;
+    background-color: #2d2d2d;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #0078d4;
+    border-color: #0078d4;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #666;
+}
+
+/* ============================================================
+   LABELS
+   ============================================================ */
+QLabel {
+    color: #ccc;
+    padding: 0px;
+}
+
+QLabel#fieldLabel {
+    font-weight: 600;
+    color: #aaa;
+    margin-top: 0px;
+}
+
+QLabel#albumCover {
+    border: 2px solid #444;
+    background: #0a0a0a;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #666;
+}
+
+QLabel#startLabel {
+    font-weight: 600;
+    color: #00ff00;
+    width: 50px;
+    text-align: center;
+    padding: 5px;
+}
+
+QLabel#endLabel {
+    font-weight: 600;
+    color: #ff0000;
+    width: 50px;
+    text-align: center;
+    padding: 5px;
+}
+
+/* ============================================================
+   COMBOBOX
+   ============================================================ */
+QComboBox {
+    background-color: #2d2d2d;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px;
+    min-height: 20px;
+}
+
+QComboBox:hover {
+    border: 1px solid #666;
+}
+
+QComboBox:focus {
+    border: 1px solid #0078d4;
+}
+
+QComboBox::drop-down {
+    border: none;
+    padding-right: 8px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #2d2d2d;
+    color: #fff;
+    selection-background-color: #0078d4;
+    border: 1px solid #555;
+}
+
+/* ============================================================
+   COMBOBOX DROPDOWN
+   ============================================================ */
+QComboBox {
+    background-color: #2d2d2d;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+QComboBox:hover {
+    border: 1px solid #666;
+    background-color: #333;
+}
+
+QComboBox:focus {
+    border: 1px solid #0078d4;
+    background-color: #333;
+}
+
+QComboBox::drop-down {
+    width: 20px;
+    border-left: 1px solid #555;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+    background-color: #3a3a3a;
+}
+
+QComboBox::drop-down:hover {
+    background-color: #4a4a4a;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #aaa;
+    width: 0px;
+    height: 0px;
+}
+
+QComboBox::down-arrow:on {
+    border-top: 5px solid #0078d4;
+}
+
+/* Dropdown list */
+QComboBox QAbstractItemView {
+    background-color: #2d2d2d;
+    color: #fff;
+    selection-background-color: #0078d4;
+    selection-color: white;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 1px;
+    outline: none;
+}
+
+QComboBox QAbstractItemView::item {
+    min-height: 25px;
+    padding: 2px;
+    border-radius: 3px;
+}
+
+QComboBox QAbstractItemView::item:hover {
+    background-color: #3a3a3a;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    background-color: #0078d4;
+    color: white;
+}
+
+/* ============================================================
+   FRAMES
+   ============================================================ */
+QWidget#controlFrame {
+    background-color: #252525;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+/* ============================================================
+   TABLES
+   ============================================================ */
+QTableWidget {
+    background-color: #1e1e1e;
+    color: #e5e5e5;
+    gridline-color: #444;
+    font-size: 14px;
+    selection-background-color: #2a82da;
+    selection-color: black;
+}
+
+QHeaderView::section {
+    background-color: #2a2a2a;
+    color: #ffffff;
+    padding: 4px;
+    border: 1px solid #444;
+    font-weight: bold;
+}
+
+QTableWidget::item {
+    padding: 6px;
+}

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Virtualenvs and pipenv
+Pipfile.lock
+poetry.lock
+
+# PyInstaller
+*.manifest
+*.spec
+
+# IDE/editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# OneDrive temp/desktop files (since you're on OneDrive)
+~$*
+
+# Python packaging
+*.egg
+*.whl
+
+# Secrets / local config
+.env
+secrets.json
+credentials.json
+config.yml
+
+# pip cache
+pip-wheel-metadata/
+
+# Git LFS pointers (if used)
+*.wav
+*.mp3
+*.flac
