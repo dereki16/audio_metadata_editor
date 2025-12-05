@@ -1,2 +1,0 @@
-self.waveformPlot = pg.PlotWidget()
-self.ui.waveformLayout.addWidget(self.waveformPlot)

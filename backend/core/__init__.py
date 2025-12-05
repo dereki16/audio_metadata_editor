@@ -1,3 +1,16 @@
-from .audio_manager import AudioManager
+# ====================
+# core/__init__.py
+# ====================
+"""
+Core business logic modules
+"""
+from .audio_controller import AudioController
+from .metadata_manager import MetadataManager
+from .waveform_controller import WaveformController
 
-__all__ = ['AudioManager']
+__all__ = [
+    'AudioController',
+    'MetadataManager',
+    'WaveformController'
+]
+
