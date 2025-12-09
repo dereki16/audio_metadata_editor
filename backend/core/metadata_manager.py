@@ -13,7 +13,9 @@ from PIL import Image
 class MetadataManager:
 
     def read_metadata(self, file_path):
-        """Read metadata using Mutagen"""
+        """Read metadata using Mutagen, filtering out garbage track numbers.
+        Robustly extract comment from multiple possible locations (easy tags, raw ID3 COMM, synopsis/description).
+        """
         try:
             audio = MutagenFile(file_path, easy=True)
             if audio is None:
@@ -21,26 +23,101 @@ class MetadataManager:
 
             md = {}
 
-            def get(key):
+            def get_easy(key):
                 return audio.get(key, [""])[0] if key in audio else ""
 
-            md["title"] = get("title")
-            md["artist"] = get("artist")
-            md["album"] = get("album")
-            md["album_artist"] = get("albumartist")
-            md["track"] = get("tracknumber")
-            md["disc"] = get("discnumber")
-            md["year"] = get("date")
-            md["genre"] = get("genre")
-            md["comment"] = get("comment")
-            md["composer"] = get("composer")
+            md["title"] = get_easy("title")
+            md["artist"] = get_easy("artist")
+            md["album"] = get_easy("album")
+            md["album_artist"] = get_easy("albumartist")
+
+            # Primary easy-mode comment
+            comment_val = get_easy("comment")
+
+            # If empty, try raw ID3 COMM frames (for mp3)
+            if not comment_val:
+                try:
+                    from mutagen.id3 import ID3, COMM
+                    id3 = ID3(file_path)
+                    comm_frames = id3.getall("COMM")
+                    if comm_frames:
+                        # Choose first non-empty COMM text
+                        for c in comm_frames:
+                            if c.text:
+                                comment_val = c.text[0] if isinstance(c.text, (list, tuple)) else str(c.text)
+                                if comment_val:
+                                    break
+                except Exception:
+                    # ignore if not mp3 or no ID3
+                    pass
+
+            # If still empty, check common alternative tags often seen in ffmpeg output
+            if not comment_val:
+                try:
+                    raw = MutagenFile(file_path)  # non-easy
+                    if raw and hasattr(raw, "tags") and raw.tags:
+                        # try common keys that ffmpeg prints: 'synopsis', 'description', 'purl'
+                        for key in ("synopsis", "description", "purl"):
+                            if key in raw.tags:
+                                v = raw.tags.get(key)
+                                # value may be list or single value
+                                if isinstance(v, (list, tuple)) and len(v) > 0:
+                                    comment_val = str(v[0])
+                                    break
+                                elif v:
+                                    comment_val = str(v)
+                                    break
+                except Exception:
+                    pass
+
+            md["comment"] = comment_val or ""
+
+            # track handling (your existing logic)
+            track_raw = get_easy("tracknumber")
+            if track_raw:
+                track_num = track_raw.split('/')[0].strip() if '/' in track_raw else track_raw.strip()
+                try:
+                    track_int = int(track_num)
+                    if track_int == 63:
+                        md["track"] = ""
+                        print(f"Filtered out garbage track number 63 from {os.path.basename(file_path)}")
+                    elif 1 <= track_int <= 999:
+                        md["track"] = track_num
+                    else:
+                        md["track"] = ""
+                        print(f"Ignoring invalid track number {track_int} for {os.path.basename(file_path)}")
+                except (ValueError, TypeError):
+                    md["track"] = ""
+            else:
+                md["track"] = ""
+
+            # disc
+            disc_raw = get_easy("discnumber")
+            if disc_raw:
+                disc_num = disc_raw.split('/')[0].strip() if '/' in disc_raw else disc_raw.strip()
+                try:
+                    disc_int = int(disc_num)
+                    if 1 <= disc_int <= 99:
+                        md["disc"] = disc_num
+                    else:
+                        md["disc"] = ""
+                except (ValueError, TypeError):
+                    md["disc"] = ""
+            else:
+                md["disc"] = ""
+
+            md["year"] = get_easy("date")
+            md["genre"] = get_easy("genre")
+            md["composer"] = get_easy("composer")
 
             # Add length if available
             try:
                 md["length"] = round(audio.info.length, 2)
-            except:
+            except Exception:
                 md["length"] = ""
 
+            # Debug print for comment
+            print(f"DEBUG Comment for {os.path.basename(file_path)}: '{md['comment']}'")
             return md
 
         except Exception as e:
@@ -78,6 +155,118 @@ class MetadataManager:
             return False
 
     # -------------------------------------------------------
+    # WRITE MP3
+    # -------------------------------------------------------
+    @staticmethod
+    def _write_mp3(file_path, metadata, cover_data, allow_blanks=True):
+        try:
+            # Load EasyID3 for text tags (create if missing)
+            try:
+                audio_easy = EasyID3(file_path)
+            except ID3NoHeaderError:
+                # create empty tags then re-open
+                audio_easy = EasyID3()
+                audio_easy.save(file_path)
+                audio_easy = EasyID3(file_path)
+
+            # Map of field names => EasyID3 keys
+            field_map = {
+                "title": "title",
+                "artist": "artist",
+                "album": "album",
+                "album_artist": "albumartist",
+                "track": "tracknumber",
+                "disc": "discnumber",
+                "year": "date",
+                "genre": "genre",
+                "composer": "composer"
+            }
+
+            # Set or clear fields in EasyID3
+            for key, atom in field_map.items():
+                val = metadata.get(key, None)
+                if val is None:
+                    continue  # skip modification
+                if val != "":
+                    audio_easy[atom] = str(val)
+                else:
+                    # empty string: clear if allowed
+                    if allow_blanks and atom in audio_easy:
+                        del audio_easy[atom]
+
+            # Also handle easy mode 'comment' if present (so both readers see it)
+            if "comment" in metadata:
+                cval = metadata.get("comment", None)
+                if cval is None:
+                    pass
+                elif cval != "":
+                    # EasyID3 uses 'comment' key (some versions) — set as list
+                    try:
+                        audio_easy["comment"] = str(cval)
+                    except Exception:
+                        # fallback: set TXXX/COMM via raw id3 later
+                        pass
+                else:
+                    # empty -> remove from easy tags if exists
+                    if allow_blanks and "comment" in audio_easy:
+                        del audio_easy["comment"]
+
+            # Save easy tags first
+            audio_easy.save(file_path)
+
+            # Now handle raw ID3 frames for robust compatibility (COMM, TXXX FEATURING, APIC)
+            from mutagen.id3 import ID3, COMM, APIC, TXXX
+            id3 = ID3(file_path)
+
+            # COMMENT (COMM) - clear existing and add if provided
+            if "comment" in metadata:
+                # remove all existing COMM frames
+                for k in list(id3.keys()):
+                    if k.startswith("COMM"):
+                        del id3[k]
+                # add new one if non-empty
+                if metadata.get("comment"):
+                    id3.add(COMM(
+                        encoding=3,
+                        lang='eng',
+                        desc='',
+                        text=str(metadata.get("comment"))
+                    ))
+
+            # FEATURE tag stored as TXXX:FEATURING (optional)
+            if "featuring" in metadata:
+                # remove existing TXXX:FEATURING frames
+                for k in list(id3.keys()):
+                    if k.startswith("TXXX:FEATURING"):
+                        del id3[k]
+                if metadata.get("featuring"):
+                    id3.add(TXXX(encoding=3, desc="FEATURING", text=str(metadata.get("featuring"))))
+
+            # Album art (APIC)
+            if cover_data:
+                for k in list(id3.keys()):
+                    if k.startswith("APIC"):
+                        del id3[k]
+                id3.add(APIC(
+                    encoding=3,
+                    mime='image/jpeg',
+                    type=3,
+                    desc='Cover',
+                    data=cover_data
+                ))
+
+            # Save raw id3
+            id3.save(v2_version=3)
+            return True
+
+        except Exception as e:
+            print("MP3 write error:", e)
+            import traceback
+            traceback.print_exc()
+            return False
+
+
+    # -------------------------------------------------------
     # MP3 WRITING
     # -------------------------------------------------------
     @staticmethod
@@ -103,7 +292,7 @@ class MetadataManager:
             }
 
             # Set or clear fields
-            for key, easy_key in field_map.items():
+            for key, atom in field_map.items():
                 val = metadata.get(key, None)
 
                 # None → skip (do not modify)
@@ -112,12 +301,12 @@ class MetadataManager:
 
                 # Non-empty → write it
                 if val != "":
-                    audio[easy_key] = str(val)
+                    audio[atom] = str(val)
                     continue
 
                 # Empty "" + allow_blanks → clear
-                if allow_blanks and easy_key in audio:
-                    del audio[easy_key]
+                if allow_blanks and atom in audio:
+                    del audio[atom]
 
 
             audio.save(file_path)
@@ -242,13 +431,12 @@ class MetadataManager:
 
                 # Non-empty → write it
                 if val != "":
-                    audio[easy_key] = str(val)
+                    audio[atom] = [str(val)]  # FIXED: M4A needs list format
                     continue
 
                 # Empty "" + allow_blanks → clear
-                if allow_blanks and easy_key in audio:
-                    del audio[easy_key]
-
+                if allow_blanks and atom in audio:
+                    del audio[atom]
 
             # Custom featuring field
             if "featuring" in metadata:
@@ -258,29 +446,37 @@ class MetadataManager:
                 elif allow_blanks and featuring_atom in audio:
                     del audio[featuring_atom]
 
-            # Track number
+            # Track number - ONLY write if explicitly provided
             if "track" in metadata:
                 t = metadata["track"]
-                if t:
-                    t = str(t)
-                    if "/" in t:
-                        a, b = t.split("/")
-                        audio["trkn"] = [(int(a), int(b))]
-                    else:
-                        audio["trkn"] = [(int(t), 0)]
+                if t and str(t).strip():  # Only if non-empty
+                    t = str(t).strip()
+                    try:
+                        if "/" in t:
+                            a, b = t.split("/", 1)
+                            audio["trkn"] = [(int(a), int(b))]
+                        else:
+                            audio["trkn"] = [(int(t), 0)]
+                    except (ValueError, TypeError):
+                        # Invalid track number format, skip it
+                        pass
                 elif allow_blanks and "trkn" in audio:
                     del audio["trkn"]
 
-            # Disc number
+            # Disc number - ONLY write if explicitly provided
             if "disc" in metadata:
                 d = metadata["disc"]
-                if d:
-                    d = str(d)
-                    if "/" in d:
-                        a, b = d.split("/")
-                        audio["disk"] = [(int(a), int(b))]
-                    else:
-                        audio["disk"] = [(int(d), 0)]
+                if d and str(d).strip():  # Only if non-empty
+                    d = str(d).strip()
+                    try:
+                        if "/" in d:
+                            a, b = d.split("/", 1)
+                            audio["disk"] = [(int(a), int(b))]
+                        else:
+                            audio["disk"] = [(int(d), 0)]
+                    except (ValueError, TypeError):
+                        # Invalid disc number format, skip it
+                        pass
                 elif allow_blanks and "disk" in audio:
                     del audio["disk"]
 

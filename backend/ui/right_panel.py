@@ -23,6 +23,7 @@ class RightPanel(QWidget):
     trim_toggled = Signal(bool)
     trim_values_changed = Signal(float, float, float)  # start_sec, end_sec, play_sec
     crop_audio_clicked = Signal()
+    overwrite_toggled = Signal(bool)
     table_cell_changed = Signal(int, int, str)  # row, column, new_value
     seek_requested = Signal(float)  # New signal for seeking playback position
     
@@ -191,6 +192,11 @@ class RightPanel(QWidget):
         self.trim_toggle = QCheckBox("Enable Audio Trimming")
         self.trim_toggle.stateChanged.connect(self._on_trim_toggled)
         trim_row.addWidget(self.trim_toggle)
+
+        self.overwrite_trim_checkbox = QCheckBox("Overwrite Original Trim")
+        self.overwrite_trim_checkbox.setChecked(True)  # enabled by default
+        self.overwrite_trim_checkbox.stateChanged.connect(self._overwrite_trim_toggled)
+        trim_row.addWidget(self.overwrite_trim_checkbox)
         
         self.trim_btn = QPushButton("✂️ Crop Audio")
         self.trim_btn.setObjectName("cropButton")
@@ -297,14 +303,13 @@ class RightPanel(QWidget):
                 
                 # Read current metadata
                 current_metadata = self._metadata_manager.read_metadata(file_path) or {}
-                
+
                 # Update only the changed field
                 updated_metadata = current_metadata.copy()
-                if new_value:  # Only save non-empty values
-                    updated_metadata[field_name] = new_value
-                else:
-                    # If empty, remove the field
-                    updated_metadata.pop(field_name, None)
+
+                # Always keep the field present.
+                # "" = clear
+                updated_metadata[field_name] = new_value
                 
                 # Save to file immediately
                 success = self._metadata_manager.write_metadata(file_path, updated_metadata)
@@ -429,6 +434,11 @@ class RightPanel(QWidget):
         checked = bool(state)
         print(f"Trim checkbox toggled: state={state}, checked={checked}")
         self.trim_toggled.emit(checked)
+
+    def _overwrite_trim_toggled(self, state):
+        """Overwrite audio file with trimmed file"""
+        checked = bool(state)
+        self.overwrite_toggled.emit(checked)
     
     def _format_time(self, seconds):
         """Convert seconds to M:SS format"""
@@ -529,6 +539,13 @@ class RightPanel(QWidget):
                 # Create default metadata with filename
                 values = [os.path.basename(path)] + [''] * 10
             else:
+                # Get length and format it
+                length_seconds = metadata.get('length', 0)
+                try:
+                    formatted_length = self._format_time(float(length_seconds))
+                except (ValueError, TypeError):
+                    formatted_length = "0:00"
+                
                 values = [
                     os.path.basename(path),
                     metadata.get('title', ''),
@@ -540,7 +557,7 @@ class RightPanel(QWidget):
                     metadata.get('year', ''),
                     metadata.get('genre', ''),
                     metadata.get('comment', ''),
-                    metadata.get('length', '')
+                    formatted_length  # Use formatted time here
                 ]
             
             for col, val in enumerate(values):
@@ -590,14 +607,22 @@ class RightPanel(QWidget):
         """Store sample rate for conversions"""
         self._sample_rate = sample_rate
 
-    def update_single_row(self, row, file_path, metadata_manager):
-        """Update a single row with current metadata"""
-        if row < len(self._audio_files) and metadata_manager:
-            metadata = metadata_manager.read_metadata(file_path)
+    def _refresh_single_row(self, row):
+        """Refresh a single row with updated metadata"""
+        if row < len(self._audio_files) and self._metadata_manager:
+            path = self._audio_files[row]
+            metadata = self._metadata_manager.read_metadata(path)
             
             if metadata:
+                # Format the length properly
+                length_seconds = metadata.get('length', 0)
+                try:
+                    formatted_length = self._format_time(float(length_seconds))
+                except (ValueError, TypeError):
+                    formatted_length = "0:00"
+                
                 values = [
-                    os.path.basename(file_path),
+                    os.path.basename(path),
                     metadata.get('title', ''),
                     metadata.get('artist', ''),
                     metadata.get('album', ''),
@@ -607,7 +632,7 @@ class RightPanel(QWidget):
                     metadata.get('year', ''),
                     metadata.get('genre', ''),
                     metadata.get('comment', ''),
-                    metadata.get('length', '')
+                    formatted_length  # Use formatted time instead of raw seconds
                 ]
                 
                 # Block signals to prevent recursive calls

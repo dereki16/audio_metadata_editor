@@ -1,238 +1,195 @@
-"""
-Title Cleaner - Utilities for cleaning audio file titles
-"""
 import re
 
-from core.metadata_manager import MetadataManager
-
 class TitleCleaner:
-    """Cleans audio titles and extracts featured artists"""
-    
+    """
+    Completely rewritten title cleaner
+    - Fixes artist/title prefix cases
+    - Extracts featured artists heavily
+    - Removes uploader usernames
+    - Properly trims junk text
+    """
+
+    # ------------------------------------------------------------
+    # Master unwanted patterns
+    # ------------------------------------------------------------
+    YT_GARBAGE = [
+        r'\[.*?official.*?\]',
+        r'\(.*?official.*?\)',
+        r'\[.*?music\s*video.*?\]',
+        r'\(.*?music\s*video.*?\)',
+        r'\[.*?audio.*?\]',
+        r'\(.*?audio.*?\)',
+        r'\[.*?lyrics.*?\]',
+        r'\(.*?lyrics.*?\)',
+        r'\[.*?explicit.*?\]',
+        r'\(.*?explicit.*?\)',
+        r'\[.*?clean.*?\]',
+        r'\(.*?clean.*?\)',
+        r'\[.*?radio\s*edit.*?\]',
+        r'\(.*?radio\s*edit.*?\)',
+        r'\[.*?hd.*?\]',
+        r'\(.*?hd.*?\)',
+        r'\[.*?hq.*?\]',
+        r'\(.*?hq.*?\)',
+        r'\(official.*?\)',
+        r'\[official.*?\]',
+        r'\(video.*?\)',
+        r'\[video.*?\]',
+        r'\(full.*?\)',
+        r'\[full.*?\]',
+    ]
+
+    # ------------------------------------------------------------
     @staticmethod
-    def clean_title(title, artist, composer="", unwanted_patterns=None):
-    # ---- FIXED FEATURED ARTIST EXTRACTION ----
-
-      # Matches:
-      # (feat X), [feat X], feat. X, ft. X, featuring X
-      # with or without parentheses
-      ft_matches = re.findall(
-          r'(?:[\(\[]\s*(?:feat|ft|featuring)\.?\s*(.*?)\s*[\)\]]|'
-          r'(?:feat|ft|featuring)\.?\s+(.*?)(?:$| - ))',
-          title,
-          flags=re.IGNORECASE
-      )
-
-      for m1, m2 in ft_matches:
-          match = m1 or m2
-          parts = re.split(r',|&| and ', match, flags=re.IGNORECASE)
-          ft_artists.extend([p.strip() for p in parts if p.strip()])
-
-      # Artist, FeaturedArtist - Title
-      if artist and ' - ' in title:
-          before_dash = title.split(' - ')[0]
-          if ',' in before_dash:
-              parts = before_dash.split(',')[1:]
-              ft_artists.extend([p.strip() for p in parts if p.strip()])
-
-      # Artist & FeaturedArtist
-      if artist:
-          and_matches = re.findall(
-              rf'{re.escape(artist)}\s*(?:&|and)\s+([^-\(\[\|]+)',
-              title,
-              flags=re.IGNORECASE
-          )
-          ft_artists.extend([m.strip() for m in and_matches])
-
-    @staticmethod
-    def batch_clean_titles(file_paths, metadata_manager, ui_artist=None):
+    def clean_title(title, original_artist, composer="", ui_artist=None):
         """
-        Batch-clean titles.
-        
-        Returns:
-            Dict[path] = {title, composer, featuring}
+        Cleans title and returns (clean_title, updated_composer, features)
         """
-        from mutagen import File as MutagenFile
-        
-        cleaned_data = {}
-        
-        for path in file_paths:
-            try:
-                audio = MutagenFile(path, easy=True)
-                if not audio:
-                    continue
-                
-                title = audio.get("title", [""])[0]
-                artist = audio.get("artist", [""])[0]
-                composer = audio.get("composer", [""])[0]
-                
-                artist_for_clean = ui_artist if ui_artist else artist
-                
-                cleaned_title, updated_composer, featuring_list = TitleCleaner.clean_title(
-                    title, artist_for_clean, composer
-                )
-
-                
-                cleaned_data[path] = {
-                    "title": cleaned_title,
-                    "composer": updated_composer,
-                    "featuring": ", ".join(featuring_list) if featuring_list else ""
-                }
-                
-            except Exception as e:
-                print(f"Error cleaning {path}: {e}")
-        
-        return cleaned_data
-    
-
-    @staticmethod
-    def clean_title(title, artist, composer="", unwanted_patterns=None):
-        import re
 
         if not title:
             return title, composer, []
 
-        # ---------------------------
-        # REQUIRED: initialize list
-        # ---------------------------
+        artist = ui_artist.strip() if ui_artist else original_artist.strip()
+
         ft_artists = []
 
-        # ---------------------------
-        # FIXED FEATURED ARTIST EXTRACTION
-        # ---------------------------
-
-        # Matches:
-        # (feat X), [feat X], feat. X, ft. X, featuring X
+        # ------------------------------------------------------------
+        # Extract ALL featured artists
+        # ------------------------------------------------------------
         ft_matches = re.findall(
-            r'(?:[\(\[]\s*(?:feat|ft|featuring)\.?\s*(.*?)\s*[\)\]]|'
-            r'(?:feat|ft|featuring)\.?\s+(.*?)(?:$| - ))',
+            r'(?:feat|ft|featuring)\.?\s*([^\-\(\)\[\]]+)',
             title,
             flags=re.IGNORECASE
         )
 
-        for m1, m2 in ft_matches:
-            match = m1 or m2
-            if match:
-                parts = re.split(r',|&| and ', match, flags=re.IGNORECASE)
-                ft_artists.extend([p.strip() for p in parts if p.strip()])
+        for m in ft_matches:
+            parts = re.split(r',|&| and ', m)
+            ft_artists.extend([p.strip() for p in parts if p.strip()])
 
-        # Artist, FeaturedArtist - Title
-        if artist and ' - ' in title:
-            before_dash = title.split(' - ')[0]
-            if ',' in before_dash:
-                parts = before_dash.split(',')[1:]
-                ft_artists.extend([p.strip() for p in parts if p.strip()])
-
-        # Artist & FeaturedArtist
-        if artist:
-            and_matches = re.findall(
-                rf'{re.escape(artist)}\s*(?:&|and)\s+([^-\(\[\|]+)',
-                title,
-                flags=re.IGNORECASE
-            )
-            ft_artists.extend([m.strip() for m in and_matches])
+        # From prefix: Artist1, Artist2 - Title
+        if ' - ' in title:
+            prefix = title.split(' - ')[0]
+            if ',' in prefix:
+                extra = [p.strip() for p in prefix.split(',')[1:] if p.strip()]
+                ft_artists.extend(extra)
 
         # Deduplicate
         ft_artists = list(dict.fromkeys(ft_artists))
 
-        # ---------------------------
-        # REMOVE ARTIST NAMES / CLEAN TITLE
-        # ---------------------------
+        # ------------------------------------------------------------
+        # REMOVE FULL ARTIST PREFIXES (your biggest issue)
+        # Examples:
+        #   "Tainy, Rauw Alejandro - SCI-FI"
+        #   "The Marias, Josh Conway - Song"
+        # ------------------------------------------------------------
+        if ' - ' in title:
+            left, right = title.split(' - ', 1)
 
-        if unwanted_patterns is None:
-            from utils import UNWANTED_PATTERNS
-            unwanted_patterns = UNWANTED_PATTERNS
+            # If UI artist is provided, trust it FIRST
+            if ui_artist:
+                left_artists = [artist]
 
-        for pattern in unwanted_patterns:
+            else:
+                # Example: "Tainy, Bad Bunny, Julieta Venegas"
+                left_artists = [p.strip() for p in re.split(r',|&| and ', left) if p.strip()]
+
+            # Add into featured list EXCEPT primary artist
+            for la in left_artists:
+                if la.lower() != artist.lower() and la not in ft_artists:
+                    ft_artists.append(la)
+
+            # Keep the RIGHT SIDE (always the title)
+            title = right
+
+        # ------------------------------------------------------------
+        # Remove YouTube garbage patterns
+        # ------------------------------------------------------------
+        for pattern in TitleCleaner.YT_GARBAGE:
             title = re.sub(pattern, '', title, flags=re.IGNORECASE)
 
-        if artist:
-            title = re.sub(
-                rf'^{re.escape(artist)}\s*[,\.\-–—]\s*',
-                '',
-                title,
-                flags=re.IGNORECASE
-            )
-            title = re.sub(
-                rf'{re.escape(artist)}\s*(?:&|and)\s+[^-\(\[]+',
-                '',
-                title,
-                flags=re.IGNORECASE
-            )
-            title = re.sub(
-                rf'\b{re.escape(artist)}\b',
-                '',
-                title,
-                flags=re.IGNORECASE
-            )
+        # ------------------------------------------------------------
+        # Remove featured patterns from inside title text
+        # ------------------------------------------------------------
+        title = re.sub(r'[\(\[]\s*(?:feat|ft|featuring)\.?\s*[^\)\]]+[\)\]]', '', title, flags=re.IGNORECASE)
+        title = re.sub(r'(?:feat|ft|featuring)\.?\s+[^\-\(\[]+', '', title, flags=re.IGNORECASE)
 
+        # Fix broken parentheses (e.g., "(full v)")
+        title = title.replace("(full v)", "full version")
 
-            # --------------------------------------
-            # REMOVE FEATURE TAGS FROM TITLE
-            # --------------------------------------
+        # Cleanup: remove empty parentheses/brackets leftover
+        title = re.sub(r'\(\s*\)', '', title)
+        title = re.sub(r'\[\s*\]', '', title)
 
-            # Remove (feat X), [feat X]
-            title = re.sub(
-                r'[\(\[]\s*(?:feat|ft|featuring)\.?\s*.*?[\)\]]',
-                '',
-                title,
-                flags=re.IGNORECASE
-            )
+        # ------------------------------------------------------------
+        # FINAL TRIM & SPACING
+        # ------------------------------------------------------------
+        title = re.sub(r'\s+', ' ', title).strip(' -_,;:.()[]')
 
-            # Remove standalone: feat. X, ft. X, featuring X
-            title = re.sub(
-                r'(?:feat|ft|featuring)\.?\s+[^-\(\[]+',
-                '',
-                title,
-                flags=re.IGNORECASE
-            )
-
-            # Remove leftover dangling parentheses/brackets/spaces
-            title = re.sub(r'\(\s*\)', '', title)
-            title = re.sub(r'\[\s*\]', '', title)
-
-
-        # Clean whitespace + punctuation
-        title = re.sub(r'\s+', ' ', title).strip(" -_,;:.()[]")
-
-        # ---------------------------
+        # ------------------------------------------------------------
         # UPDATE COMPOSER FIELD
-        # ---------------------------
-
+        # ------------------------------------------------------------
         existing = [c.strip() for c in composer.split(',') if c.strip()] if composer else []
         for ft in ft_artists:
-            if ft and not any(ft.lower() == e.lower() for e in existing):
+            if ft.lower() not in [e.lower() for e in existing]:
                 existing.append(ft)
-
-        updated_composer = ", ".join(existing) if existing else ""
+        updated_composer = ", ".join(existing)
 
         return title, updated_composer, ft_artists
 
-    
+    # ------------------------------------------------------------
+    @staticmethod
+    def batch_clean_titles(file_paths, metadata_manager, ui_artist=None):
+        from mutagen import File as MF
+
+        cleaned = {}
+
+        for path in file_paths:
+            try:
+                audio = MF(path, easy=True)
+                if not audio:
+                    continue
+
+                title = audio.get("title", [""])[0]
+                artist = audio.get("artist", [""])[0]
+                composer = audio.get("composer", [""])[0]
+
+                clean_title, new_composer, features = TitleCleaner.clean_title(
+                    title,
+                    artist,
+                    composer,
+                    ui_artist=ui_artist
+                )
+
+                cleaned[path] = {
+                    "title": clean_title,
+                    "composer": new_composer,
+                    "featuring": ", ".join(features)
+                }
+
+            except Exception as e:
+                print("Clean error:", path, e)
+
+        return cleaned
+
+    # ------------------------------------------------------------
     @staticmethod
     def apply_cleaned_titles(cleaned_data):
-        from mutagen import File as MutagenFile
-        saved_count = 0
+        from core.metadata_manager import MetadataManager
+
+        saved = 0
 
         for path, data in cleaned_data.items():
             try:
-                metadata = {
-                    "title": data["title"],
-                    "composer": data["composer"],
-                    "featuring": data["featuring"],     # <-- SEND THIS
-                    "comment": data["featuring"],       # <-- optional if you want mirroring
-                }
-
                 MetadataManager.write_metadata(
                     path,
-                    metadata,
-                    cover_data=None,
-                    allow_blanks=True
+                    {
+                        "title": data["title"],
+                        "composer": data["composer"],
+                        "comment": data["featuring"]
+                    },
                 )
+                saved += 1
+            except:
+                pass
 
-                saved_count += 1
-
-            except Exception as e:
-                print(f"Error saving {path}: {e}")
-
-        return saved_count
-
+        return saved

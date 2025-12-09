@@ -85,7 +85,7 @@ class AlbumCoverEditor(QWidget):
         self.resize_start_crop = QPoint()
         
         # Handle size for corners
-        self.handle_size = 25
+        self.handle_size = 50
         
         self._setup_ui()
         self._center_crop()

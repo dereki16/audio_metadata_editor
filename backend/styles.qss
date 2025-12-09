@@ -327,3 +327,7 @@ QHeaderView::section {
     border: 1px solid #404040;
     font-weight: bold;
 }
+
+QIcon {
+    background-color: #000000;
+}

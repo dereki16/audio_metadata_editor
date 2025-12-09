@@ -1,9 +1,9 @@
 """
 Audio Controller - Handles audio playback, loading, and trimming operations
+WITH FFMPEG CONSOLE WINDOW FIX
 """
 from PySide6.QtCore import QObject, Signal, QUrl
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from pydub import AudioSegment
 import numpy as np
 from mutagen import File as MutagenFile
 from mutagen.id3 import ID3, APIC, ID3NoHeaderError
@@ -11,7 +11,46 @@ from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
 import os
+import sys
+import subprocess
 
+# ============================================================
+# CRITICAL: Hide FFmpeg console window on Windows
+# This MUST be at module level before pydub import
+# ============================================================
+if sys.platform == 'win32':
+    import subprocess
+    
+    # Save original subprocess.Popen
+    _original_subprocess_popen = subprocess.Popen
+    
+    # Create wrapper that always hides console
+    class _PopenWrapper:
+        def __init__(self, *args, **kwargs):
+            # Force startupinfo with hidden window
+            if 'startupinfo' not in kwargs:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                kwargs['startupinfo'] = startupinfo
+            
+            # Force creationflags to hide window
+            if 'creationflags' not in kwargs:
+                kwargs['creationflags'] = 0
+            kwargs['creationflags'] |= subprocess.CREATE_NO_WINDOW
+            
+            # Call original Popen
+            self._process = _original_subprocess_popen(*args, **kwargs)
+        
+        def __getattr__(self, name):
+            return getattr(self._process, name)
+    
+    # Replace subprocess.Popen globally
+    subprocess.Popen = _PopenWrapper
+
+# NOW import pydub (will use our patched subprocess)
+from pydub import AudioSegment
+# ============================================================
 
 class AudioController(QObject):
     """Manages audio playback, loading, and trimming"""
@@ -42,10 +81,9 @@ class AudioController(QObject):
     def load_audio(self, file_path):
         """Load audio file and extract waveform data"""
         try:
-            from pydub import AudioSegment
-            
             print(f"Loading audio: {file_path}")
             
+            # This now uses our hidden subprocess wrapper
             audio = AudioSegment.from_file(file_path)
             self.samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
             
@@ -57,14 +95,11 @@ class AudioController(QObject):
             self.current_file = file_path
             self.duration_seconds = len(self.samples) / self.sample_rate
             
-            print(f"Loaded {len(self.samples)} samples at {self.sample_rate}Hz, duration={self.duration_seconds:.2f}s")
+            print(f"Loaded {len(self.samples)} samples at {self.sample_rate}Hz")
             
-            # Set up playback - IMPORTANT: Use absolute path
+            # Set up playback
             file_url = QUrl.fromLocalFile(os.path.abspath(file_path))
             self.player.setSource(file_url)
-            
-            print(f"Player source set to: {file_url.toString()}")
-            print(f"Player has valid source: {not self.player.source().isEmpty()}")
             
             info = {
                 'samples': self.samples,
@@ -158,37 +193,44 @@ class AudioController(QObject):
             print("Starting/resuming playback")
             self.player.play()
     
-    def crop_audio(self, file_path, trim_start_samples, trim_end_samples):
-        """
-        Trim audio file and save with metadata preserved
-        
-        Args:
-            file_path: Path to original audio file
-            trim_start_samples: Start trim position in samples
-            trim_end_samples: End trim position in samples
-            
-        Returns:
-            Path to trimmed file or None on error
-        """
+    def crop_audio(self, file_path, trim_start_samples, trim_end_samples, overwrite_original=False):
+        """Trim audio file, optionally overwriting original, preserving metadata correctly."""
+
         if not self.sample_rate:
-            raise ValueError("No audio loaded")
-        
-        # Convert samples to milliseconds
+            raise ValueError("No audio loaded for trimming")
+
+        # Convert samples -> ms
         start_ms = int((trim_start_samples / self.sample_rate) * 1000)
         end_ms = int((trim_end_samples / self.sample_rate) * 1000)
-        
         if start_ms >= end_ms:
             raise ValueError("Start time must be before end time")
-        
-        # Load and trim
+
+        base, ext = os.path.splitext(file_path)
+        save_path = file_path if overwrite_original else f"{base}_trimmed{ext}"
+
+        # --- Read original metadata BEFORE we touch the file ---
+        try:
+            original_easy = MutagenFile(file_path, easy=True)   # easy tags (dict-like) for many formats
+        except Exception:
+            original_easy = None
+
+        # extract cover bytes (works for mp3/flac/mp4)
+        try:
+            original_full = MutagenFile(file_path, easy=False)
+        except Exception:
+            original_full = None
+
+        cover_bytes = None
+        try:
+            cover_bytes = self._extract_cover(original_full) if original_full else None
+        except Exception:
+            cover_bytes = None
+
+        # Load and trim audio (this step will overwrite metadata if we write to same file)
         audio_segment = AudioSegment.from_file(file_path)
         trimmed = audio_segment[start_ms:end_ms]
-        
-        # Generate output path
-        base, ext = os.path.splitext(file_path)
-        save_path = f"{base}_trimmed{ext}"
-        
-        # Export with correct format
+
+        # Determine export format
         format_map = {
             ".mp3": "mp3",
             ".wav": "wav",
@@ -199,37 +241,67 @@ class AudioController(QObject):
         export_format = format_map.get(ext.lower())
         if not export_format:
             raise ValueError(f"Unsupported format: {ext}")
-        
-        trimmed.export(save_path, format=export_format)
-        
-        # Copy metadata
-        self._copy_metadata(file_path, save_path)
-        
-        return save_path
-    
-    def _copy_metadata(self, source_path, dest_path):
-        """Copy metadata from source to destination file"""
+
+        # Preserve bitrate for MP3 if available
+        kwargs = {}
         try:
-            original_easy = MutagenFile(source_path, easy=True)
-            original_raw = MutagenFile(source_path, easy=False)
-            
-            # Extract cover art
-            cover_data = self._extract_cover(original_raw) if original_raw else None
-            
-            ext = os.path.splitext(dest_path)[1].lower()
-            
-            if ext == ".mp3":
-                self._copy_mp3_metadata(dest_path, original_easy, cover_data)
-            elif ext == ".flac":
-                self._copy_flac_metadata(dest_path, original_easy, cover_data)
-            elif ext == ".m4a":
-                self._copy_m4a_metadata(dest_path, original_easy, cover_data)
+            orig_meta_for_bitrate = MutagenFile(file_path)
+            if hasattr(orig_meta_for_bitrate, "info") and hasattr(orig_meta_for_bitrate.info, "bitrate"):
+                kwargs["bitrate"] = f"{orig_meta_for_bitrate.info.bitrate // 1000}k"
+        except Exception:
+            pass
+
+        # Export trimmed audio (this will replace file if overwrite_original=True)
+        trimmed.export(save_path, format=export_format, **kwargs)
+
+        # --- Restore metadata according to format ---
+        try:
+            lower_ext = ext.lower()
+            if lower_ext == ".mp3":
+                # original_easy may be EasyID3-like or None
+                self._copy_mp3_metadata(save_path, original_easy, cover_bytes)
+            elif lower_ext == ".flac":
+                self._copy_flac_metadata(save_path, original_easy, cover_bytes)
+            elif lower_ext in (".m4a", ".mp4"):
+                self._copy_m4a_metadata(save_path, original_easy, cover_bytes)
             else:
-                self._copy_generic_metadata(dest_path, original_easy)
-                
+                # generic fallback - write common tags back
+                self._copy_generic_metadata(save_path, original_easy)
         except Exception as e:
-            print(f"Metadata copy error: {e}")
+            print(f"Warning: failed to restore metadata after trimming: {e}")
+
+        print(f"Audio trimmed {'(overwritten original)' if overwrite_original else '(new copy)'}: {save_path}")
+        return save_path
+
     
+    def _copy_metadata(self, src, dst):
+        """Copy metadata from src → dst, supporting MP3, FLAC, WAV, etc."""
+        try:
+            original = MutagenFile(src, easy=False)
+            target = MutagenFile(dst, easy=False)
+
+            if not original:
+                print("No original metadata found.")
+                return
+
+            # ---------- MP3 (ID3 Tags) ----------
+            if isinstance(original, ID3):
+                target.clear()   # wipe auto-generated tags
+                for key, frame in original.items():
+                    target.add(frame)  # add actual ID3 frame
+                target.save(v2_version=3)
+                print("ID3 metadata copied.")
+                return
+
+            # ---------- Non-MP3 (FLAC, OGG, M4A, WAV) ----------
+            if original.tags:
+                target.tags = original.tags
+                target.save()
+                print("Non-MP3 metadata copied.")
+
+        except Exception as e:
+            print(f"Metadata copy failed: {e}")
+
     def _extract_cover(self, audio_file):
         """Extract album art from audio file"""
         try:
